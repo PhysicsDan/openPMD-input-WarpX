@@ -73,7 +73,7 @@ def calculate_macroparticle_weight(density, cell_volume, ppc):
     return macroparticle_weight
 
 
-def calculate_number_ppc(density, ppc_per_density, min_density=0, max_density=np.inf):
+def calculate_number_ppc(density, ppc_per_density, min_ppc=1, max_ppc=np.inf):
     """
     Returns array of ppc
 
@@ -81,11 +81,18 @@ def calculate_number_ppc(density, ppc_per_density, min_density=0, max_density=np
     density         (numpy.ndarray)     Array of number density values
     ppc_per_density (float)             ppc ~ density/ppc_per_density
 
+    In regions were density*ppc_per_density < 1 but > 0 the value of ppc will be
+    set to min_ppc.
+
     Note: currently asumes a square cell. Will be updated when needed...
     """
-    density = np.clip(density, min_density, max_density)
-    ppc = density / ppc_per_density
+    ppc = density * ppc_per_density
+    print(ppc.shape)
+    ppc[(ppc < min_ppc) * (ppc > 0)] = min_ppc
+    ppc[(ppc > max_ppc)] = max_ppc
+    print(ppc.shape)
     ppc = round_to_nearest_square(ppc)
+    print(ppc.shape)
     return ppc
 
 
@@ -123,7 +130,7 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
         dx (float) Cell size in x direction
         dz (float) Cell size in z direction
     """
-
+    print("Generating position grid. This needs optimisation.")
     # flatten the mesh
     ppc_grid = ppc_grid.flatten()
     # here I will remove any zero weight cells to speed up for loop
@@ -155,11 +162,12 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
         X, Z = np.meshgrid(x_ppc, z_ppc)
 
         # store the flattened positons in the array
-        x_out[start_idx:ppc] = X.flatten()
-        z_out[start_idx:ppc] = Z.flatten()
+        x_out[start_idx : start_idx + ppc] = X.flatten()
+        z_out[start_idx : start_idx + ppc] = Z.flatten()
         start_idx += ppc
 
-    return x_out, y_out, z_out
+    pos_arr = np.vstack([x_out, y_out, z_out])
+    return pos_arr
 
 
 #################################
@@ -170,6 +178,7 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
 # be relatively easy to modify the code below as needed
 
 
+# Eventually this will be rewritten as a class
 def hdf5_species_template(filename, species):
     """
     This function returns a h5py file with a template that can be used as a particle input
@@ -225,6 +234,9 @@ def set_weight(f, species, weights):
 def set_position(f, species, pos_arr, geom="2D"):
     if geom == "2D":
         geom = ["x", "z"]
+    else:
+        raise ValueError("Only accepting 2D cartesian geometry currently")
+
     for idx, axis in enumerate(geom):
         pos = f.create_dataset(
             f"data/0/particles/{species}/position/{axis}", data=pos_arr[idx, :]
