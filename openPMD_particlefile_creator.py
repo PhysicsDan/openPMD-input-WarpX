@@ -1,3 +1,6 @@
+# File: openPMD_particlefile_creator.py
+# Author: Daniel Molloy <https://github.com/PhysicsDan>
+# Last Edited: 2023-10-26 11:23:18
 """
 Functions to create openPMD file for WarpX particle initialisation.
 
@@ -22,6 +25,7 @@ in each direction and in 2D cartesian. I will update the code if I need otherwis
 """
 import h5py
 import numpy as np
+from tqdm import tqdm
 
 
 def evenly_spaced_values(x0: float, x1: float, nx: int):
@@ -130,7 +134,6 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
         dx (float) Cell size in x direction
         dz (float) Cell size in z direction
     """
-    print("Generating position grid. This needs optimisation.")
     # flatten the mesh
     ppc_grid = ppc_grid.flatten()
     # here I will remove any zero weight cells to speed up for loop
@@ -143,28 +146,27 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
 
     # create output arrays
     x_out = np.zeros(ppc_grid.sum())
-    y_out = x_out.copy()
-    z_out = x_out.copy()
+    y_out = np.zeros_like(x_out)
+    z_out = np.zeros_like(x_out)
 
-    # keep track of where you are
-    start_idx = 0
-
-    for i in range(ppc_grid.size):
-        # get x, z and ppc value for cell
-        x_0 = x_mesh[i]
-        z_0 = z_mesh[i]
-        ppc = ppc_grid[i]
-
-        # get the macroparticle postions in x and z
-        x_ppc = evenly_spaced_values(x_0, x_0 + dx, int(np.sqrt(ppc)))
-        z_ppc = evenly_spaced_values(z_0, z_0 + dz, int(np.sqrt(ppc)))
-        # get a meshgrid with size ppc
-        X, Z = np.meshgrid(x_ppc, z_ppc)
-
-        # store the flattened positons in the array
-        x_out[start_idx : start_idx + ppc] = X.flatten()
-        z_out[start_idx : start_idx + ppc] = Z.flatten()
-        start_idx += ppc
+    ppc_cumsum = np.cumsum(ppc_grid)
+    unique_ppc = np.unique(ppc_grid)
+    with tqdm(total=ppc_grid.size) as pbar:
+        for ppc in unique_ppc:
+            # cells with this number of ppc
+            cell_indicies = np.where(ppc_grid == ppc)[0]
+            # get evenly spaced values for x and z
+            x_ppc = evenly_spaced_values(0, dx, int(np.sqrt(ppc)))
+            z_ppc = evenly_spaced_values(0, dz, int(np.sqrt(ppc)))
+            X, Z = np.meshgrid(x_ppc, z_ppc)
+            X = X.flatten()
+            Z = Z.flatten()
+            for cell_idx in cell_indicies:
+                csum_idx = cell_idx if cell_idx == 0 else cell_idx - 1
+                start_idx = ppc_cumsum[csum_idx]
+                x_out[start_idx : start_idx + ppc] = x_mesh[cell_idx] + X
+                z_out[start_idx : start_idx + ppc] = z_mesh[cell_idx] + Z
+                pbar.update(1)
 
     pos_arr = np.vstack([x_out, y_out, z_out])
     return pos_arr
@@ -173,7 +175,7 @@ def create_position_array(x_mesh, z_mesh, ppc_grid, dx, dz):
 #################################
 # -------------------------------#
 # The code below is for writing to the hdf5 file
-# As of May '22 this works but the WarpX developers
+# As of May '23 this works but the WarpX developers
 # seem to be making changes so it may break. It should
 # be relatively easy to modify the code below as needed
 
